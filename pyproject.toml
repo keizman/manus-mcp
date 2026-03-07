@@ -4,32 +4,36 @@ build-backend = "hatchling.build"
 
 [project]
 name = "manus-mcp"
-version = "0.1.0"
-description = "An MCP server that can browse the web, perform search queries, and execute code"
+version = "0.2.0"
+description = "An MCP server that bridges local CLI tools with the Manus cloud AI agent platform. Supports web search, planning, and coding modes."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "Your Name", email = "your.email@example.com"},
+    {name = "keizman"},
 ]
 
 dependencies = [
-    "fastapi>=0.104.1",
-    "uvicorn>=0.30.0",
-    "pydantic>=2.4.2",
-    "httpx>=0.27.0",
     "python-dotenv>=1.0.0",
-    "mcp==1.4.1",
-    "googlesearch-python>=1.2.3",
-    "browser-use>=0.1.40",
+    "mcp>=1.4.1",
+    "httpx>=0.27.0",
+    "pydantic>=2.4.2",
 ]
 
 [project.optional-dependencies]
+# Legacy local tools (browser-use, google search, code execution)
+legacy = [
+    "fastapi>=0.104.1",
+    "uvicorn>=0.30.0",
+    "googlesearch-python>=1.2.3",
+    "browser-use>=0.1.40",
+]
 dev = [
     "black",
     "isort",
     "mypy",
     "pytest",
+    "pytest-asyncio",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -47,5 +51,6 @@ line_length = 88
 python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true 
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

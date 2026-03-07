@@ -1,2 +1,3 @@
-# Manus MCP Server
-# A Model Context Protocol (MCP) server that can browse the web, perform search queries, and execute code. 
+# Manus MCP Server (Enhanced Edition)
+# A Model Context Protocol server that bridges local CLI tools with the Manus cloud AI agent platform.
+# Supports web search, planning, and coding modes with optional local browser integration.

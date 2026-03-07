@@ -1,148 +1,224 @@
-# Manus MCP
+# Manus MCP (Enhanced Edition)
 
-<p align="center">
-  <img src="meme.jpeg" alt="Manus MCP" width="50%">
-</p>
+> A Model Context Protocol (MCP) server that bridges local CLI tools (Codex, Claude Desktop, etc.) with the **Manus cloud AI agent platform**.
 
-A Model Context Protocol (MCP) server implementation that can browse the web, perform search queries, and execute code.
+Manus MCP lets you dispatch powerful cloud-based AI tasks — web search, research planning, and code generation — directly from your terminal or any MCP-compatible client. All tasks support optional **local browser integration** and real-time **status monitoring**.
 
-## Current Features
+## Features
 
-- "google_search" tool that performs Google searches and returns relevant links
-- "browse_web" tool that allows browsing websites, clicking elements, and extracting content
-- "code_interpreter" tool that allows reading, writing, and executing code in a sandbox environment
-- "bash_tool" tool that allows running shell commands in the sandbox directory
+| Mode | Tool Name | Description | Default Profile |
+|------|-----------|-------------|-----------------|
+| **Web Search** | `manus_web_search` | Quick, cited web search answers. Acts as an AI-powered search engine. | `manus-1.6-lite` |
+| **Plan** | `manus_plan` | Deep research, fact-checking, and structured professional planning. | `manus-1.6` |
+| **Coding** | `manus_code` | Create code from scratch or modify existing git repositories. | `manus-1.6` |
 
-## Using with Claude for Desktop
+### Additional Tools
 
-To use Manus MCP with Claude for Desktop:
+| Tool Name | Description |
+|-----------|-------------|
+| `get_task_status` | Poll task status and retrieve results (text + file attachments). |
+| `list_manus_tasks` | List all tasks created in the current session. |
+| `cancel_task` | Cancel a running task. |
+| `manus_identity` | Describe available capabilities (auto-invoked by some clients). |
 
-1. Create or edit the Claude for Desktop configuration file:
-   - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+### Cross-Cutting Features
 
-2. Add the following configuration:
-   ```json
-   {
-     "mcpServers": {
-       "manus-mcp": {
-         "command": "uv",
-         "args": [
-           "--directory",
-           "/ABSOLUTE/PATH/TO/manus-mcp",
-           "run",
-           "mcp_server.py"
-         ]
-       }
-     }
-   }
-   ```
+- **Local Browser Support**: All task modes accept `use_local_browser=True` to let the Manus agent use your authenticated browser session (for sites requiring login).
+- **Agent Profile Selection**: Choose between `manus-1.6-lite` (fast), `manus-1.6` (balanced), or `manus-1.6-max` (most capable).
+- **Task Status Monitoring**: Non-blocking task creation with polling-based status checks.
+- **Structured JSON Output**: All tools return well-formed JSON for easy parsing by LLM clients.
 
-3. Restart Claude for Desktop
+## Quick Start
 
-4. You should now see the Manus MCP tools available in Claude for Desktop
-
-## Available Tools
-
-### hello_world
-
-A simple greeting tool that returns a welcome message.
-
-### google_search
-
-Performs Google searches and returns a list of relevant links.
-
-### browse_web
-
-Interacts with a web browser to navigate websites and extract information. Supported actions:
-- `navigate`: Go to a specific URL
-- `click`: Click an element by index
-- `input_text`: Input text into an element
-- `get_content`: Get the page content
-- `execute_js`: Execute JavaScript code
-- `scroll`: Scroll the page
-- `refresh`: Refresh the current page
-
-### code_interpreter
-
-Allows reading, writing, and executing code files in a sandboxed environment. Supported actions:
-- `read`: Read the contents of a file
-- `write`: Write content to a file
-- `execute`: Execute a file or code snippet
-- `list`: List files in the sandbox
-
-Supports multiple programming languages including Python, JavaScript (Node.js), Bash, Ruby, Perl, and R.
-
-### bash_tool
-
-Executes bash commands in the sandbox directory. Features:
-- Run commands in foreground or background mode
-- Start web servers and other long-running processes
-- Install packages and dependencies
-- Manage files and processes
-
-## Environment Variables
-
-The following environment variables can be configured:
-
-- `SANDBOX_DIR`: Path to the sandbox directory (default: `~/manus-sandbox`)
-- `GLOBAL_TIMEOUT`: Global timeout for all operations in seconds (default: 60)
-- `BROWSER_HEADLESS`: Whether to run the browser in headless mode (default: false)
-- `GOOGLE_SEARCH_MAX_RESULTS`: Maximum number of search results to return (default: 10)
-- `LOG_LEVEL`: Logging level (default: INFO)
-
-## Development Guide
-
-### Prerequisites
+### 1. Prerequisites
 
 - Python 3.11+
-- [uv](https://github.com/astral-sh/uv) - Fast Python package installer and resolver
+- [uv](https://github.com/astral-sh/uv) (recommended) or pip
+- A [Manus API key](https://manus.im/settings)
 
-### Installation
-
-#### Using Setup Script (Recommended)
+### 2. Installation
 
 ```bash
+git clone https://github.com/keizman/manus-mcp.git
+cd manus-mcp
 ./setup.sh
 ```
 
-#### Manual Installation
-
-1. Clone the repository
-   ```bash
-   git clone https://github.com/yourusername/manus-mcp.git
-   cd manus-mcp
-   ```
-
-2. Create a virtual environment and install dependencies
-   ```bash
-   uv venv
-   source .venv/bin/activate
-   uv pip install -e .        # Install the project and its dependencies
-   ```
-
-3. Run the server
-   ```bash
-   # Make sure your virtual environment is activated
-   source .venv/bin/activate
-   ./run.py
-   # or
-   uvicorn app.main:app --reload
-   ```
-
-4. Visit `http://localhost:8000/docs` to see the API documentation
-
-### Development Dependencies
-
-To install development dependencies:
+Or manually:
 
 ```bash
-uv pip install -e ".[dev]"
+uv venv && source .venv/bin/activate
+uv pip install -e .
+cp .env.example .env
+# Edit .env and set your MANUS_API_KEY
 ```
 
-### API Documentation
+### 3. Configuration
 
-The API follows the [Model Context Protocol (MCP) specification](https://modelcontextprotocol.io/).
+Edit `.env` and add your Manus API key:
+
+```env
+MANUS_API_KEY=your-manus-api-key-here
+```
+
+### 4. Usage with Claude Desktop
+
+Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "manus-mcp": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/ABSOLUTE/PATH/TO/manus-mcp",
+        "run",
+        "mcp_server.py"
+      ],
+      "env": {
+        "MANUS_API_KEY": "your-manus-api-key-here"
+      }
+    }
+  }
+}
+```
+
+### 5. Usage with OpenAI Codex CLI
+
+```bash
+codex --mcp-config claude_desktop_config.json
+```
+
+Then ask Codex to use the Manus tools:
+
+```
+> Search the web for the latest Python 3.13 features
+> Create a plan for migrating our app from React to Next.js
+> Build a REST API with FastAPI that manages a todo list
+```
+
+## Workflow
+
+The typical interaction pattern is **create → poll → retrieve**:
+
+```
+1. Client calls manus_web_search("latest AI news")
+   → Returns: {"task_id": "abc123", "status": "running", ...}
+
+2. Client calls get_task_status("abc123")
+   → Returns: {"status": "running", ...}
+
+3. Client calls get_task_status("abc123") again
+   → Returns: {"status": "completed", "final_text": "...", "attachments": [...]}
+```
+
+All task creation is **non-blocking** — the tool returns immediately with a `task_id`, and the client polls for results at its own pace.
+
+## Architecture
+
+```
+┌─────────────────┐     MCP (stdio)     ┌──────────────────┐     HTTPS     ┌─────────────┐
+│  Codex / Claude  │ ◄──────────────────► │   manus-mcp      │ ◄────────────► │  Manus API  │
+│  Desktop / etc.  │                     │   (MCP Server)    │              │  (Cloud)    │
+└─────────────────┘                     └──────────────────┘              └─────────────┘
+                                               │
+                                        ┌──────┴──────┐
+                                        │             │
+                                   ┌────▼────┐  ┌────▼────────┐
+                                   │ Prompt  │  │ Task        │
+                                   │ Builder │  │ Manager     │
+                                   └─────────┘  └─────────────┘
+```
+
+### Module Structure
+
+```
+manus-mcp/
+├── mcp_server.py              # MCP tool definitions (entry point)
+├── app/
+│   ├── __init__.py
+│   ├── manus_api_client.py    # Manus REST API client (httpx-based)
+│   ├── prompt_builder.py      # Optimized prompts for each task mode
+│   ├── task_manager.py        # Task lifecycle management & local cache
+│   ├── code_execution.py      # (Legacy) Local code execution
+│   ├── search.py              # (Legacy) Local search
+│   └── web_browser.py         # (Legacy) Local browser
+├── tests/
+│   ├── test_modules.py        # Unit tests for all modules
+│   └── test_mcp_tools.py      # Integration tests for MCP tools
+├── .env.example               # Configuration template
+├── claude_desktop_config.json # Example client config
+├── pyproject.toml             # Project metadata & dependencies
+├── setup.sh                   # Automated setup script
+└── README.md                  # This file
+```
+
+## API Reference
+
+### `manus_web_search(query, use_local_browser?, agent_profile?)`
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | `str` | *(required)* | The search query or question |
+| `use_local_browser` | `bool` | `False` | Use your local browser session |
+| `agent_profile` | `str` | `"manus-1.6-lite"` | Agent capability level |
+
+### `manus_plan(topic, context?, use_local_browser?, agent_profile?)`
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `topic` | `str` | *(required)* | Subject to research and plan for |
+| `context` | `str` | `""` | Additional constraints or requirements |
+| `use_local_browser` | `bool` | `False` | Use your local browser session |
+| `agent_profile` | `str` | `"manus-1.6"` | Agent capability level |
+
+### `manus_code(prompt, git_repo_url?, language?, use_local_browser?, agent_profile?)`
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prompt` | `str` | *(required)* | What to build or change |
+| `git_repo_url` | `str` | `""` | Existing repo to clone and modify |
+| `language` | `str` | `""` | Preferred language/framework |
+| `use_local_browser` | `bool` | `False` | Use your local browser session |
+| `agent_profile` | `str` | `"manus-1.6"` | Agent capability level |
+
+### `get_task_status(task_id)`
+
+Returns a JSON object with:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `task_id` | `str` | Task identifier |
+| `status` | `str` | `"running"`, `"pending"`, `"completed"`, or `"failed"` |
+| `is_complete` | `bool` | Whether the task has finished |
+| `final_text` | `str` | Final output text (only when completed) |
+| `attachments` | `array` | Generated files with download URLs (only when completed) |
+| `task_url` | `str` | Link to view the task in the Manus web app |
+| `credit_usage` | `int` | Credits consumed |
+
+## Development
+
+```bash
+# Install dev dependencies
+uv pip install -e ".[dev]"
+
+# Run tests
+python -m pytest tests/ -v
+
+# Format code
+black app/ mcp_server.py tests/
+isort app/ mcp_server.py tests/
+```
+
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `MANUS_API_KEY` | **Yes** | — | Your Manus API key |
+| `MANUS_API_BASE_URL` | No | `https://api.manus.ai` | API base URL |
+| `LOG_LEVEL` | No | `INFO` | Logging level |
 
 ## License
 
-[MIT](LICENSE) 
+[MIT](LICENSE)

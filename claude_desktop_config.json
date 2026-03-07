@@ -4,10 +4,13 @@
       "command": "uv",
       "args": [
         "--directory",
-        "/ABOSLUTE/PATH/TO/manus-mcp",
+        "/ABSOLUTE/PATH/TO/manus-mcp",
         "run",
         "mcp_server.py"
-      ]
+      ],
+      "env": {
+        "MANUS_API_KEY": "your-manus-api-key-here"
+      }
     }
   }
-} 
+}
