@@ -5,6 +5,8 @@ These tests verify that:
 - All MCP tools are properly registered
 - Tools produce valid JSON output
 - Error handling works correctly at the tool level
+- Multi-turn conversation parameters are passed through
+- simple_task tool works correctly
 """
 
 import json
@@ -38,6 +40,10 @@ class TestMCPToolRegistration:
         import mcp_server
         assert hasattr(mcp_server, 'manus_code')
 
+    def test_manus_simple_task_exists(self):
+        import mcp_server
+        assert hasattr(mcp_server, 'manus_simple_task')
+
     def test_get_task_status_exists(self):
         import mcp_server
         assert hasattr(mcp_server, 'get_task_status')
@@ -62,6 +68,8 @@ class TestMCPToolOutputFormat:
         assert "manus_web_search" in result
         assert "manus_plan" in result
         assert "manus_code" in result
+        assert "manus_simple_task" in result
+        assert "task_id" in result  # multi-turn docs
 
     @pytest.mark.asyncio
     async def test_web_search_returns_json(self):
@@ -70,6 +78,7 @@ class TestMCPToolOutputFormat:
             "task_id": "test-001",
             "mode": "web_search",
             "status": "running",
+            "is_continuation": False,
         }
         with patch.object(
             mcp_server.task_manager, 'create_web_search',
@@ -87,6 +96,7 @@ class TestMCPToolOutputFormat:
             "task_id": "test-002",
             "mode": "plan",
             "status": "running",
+            "is_continuation": False,
         }
         with patch.object(
             mcp_server.task_manager, 'create_plan',
@@ -104,6 +114,7 @@ class TestMCPToolOutputFormat:
             "task_id": "test-003",
             "mode": "coding",
             "status": "running",
+            "is_continuation": False,
         }
         with patch.object(
             mcp_server.task_manager, 'create_coding',
@@ -115,6 +126,45 @@ class TestMCPToolOutputFormat:
             assert parsed["mode"] == "coding"
 
     @pytest.mark.asyncio
+    async def test_simple_task_returns_json(self):
+        import mcp_server
+        mock_result = {
+            "task_id": "test-004",
+            "mode": "simple_task",
+            "status": "running",
+            "is_continuation": False,
+        }
+        with patch.object(
+            mcp_server.task_manager, 'create_simple_task',
+            new_callable=AsyncMock, return_value=mock_result
+        ):
+            result = await mcp_server.manus_simple_task("do something custom")
+            parsed = json.loads(result)
+            assert parsed["task_id"] == "test-004"
+            assert parsed["mode"] == "simple_task"
+
+    @pytest.mark.asyncio
+    async def test_simple_task_continuation_returns_json(self):
+        import mcp_server
+        mock_result = {
+            "task_id": "test-004",
+            "mode": "simple_task",
+            "status": "running",
+            "is_continuation": True,
+            "turn_count": 2,
+        }
+        with patch.object(
+            mcp_server.task_manager, 'create_simple_task',
+            new_callable=AsyncMock, return_value=mock_result
+        ):
+            result = await mcp_server.manus_simple_task(
+                "follow up instruction", task_id="test-004"
+            )
+            parsed = json.loads(result)
+            assert parsed["is_continuation"] is True
+            assert parsed["turn_count"] == 2
+
+    @pytest.mark.asyncio
     async def test_get_status_returns_json(self):
         import mcp_server
         mock_result = {
@@ -122,6 +172,7 @@ class TestMCPToolOutputFormat:
             "status": "completed",
             "is_complete": True,
             "final_text": "The answer is 42.",
+            "can_continue": True,
         }
         with patch.object(
             mcp_server.task_manager, 'get_status',
@@ -131,6 +182,7 @@ class TestMCPToolOutputFormat:
             parsed = json.loads(result)
             assert parsed["status"] == "completed"
             assert parsed["is_complete"] is True
+            assert parsed["can_continue"] is True
 
     @pytest.mark.asyncio
     async def test_list_tasks_returns_json_array(self):
@@ -154,6 +206,71 @@ class TestMCPToolOutputFormat:
             result = await mcp_server.cancel_task("test-001")
             parsed = json.loads(result)
             assert parsed["success"] is True
+
+
+class TestMCPToolMultiTurn:
+    """Verify that multi-turn task_id parameter is correctly passed through."""
+
+    @pytest.mark.asyncio
+    async def test_web_search_passes_task_id(self):
+        import mcp_server
+        mock_result = {"task_id": "ws-001", "is_continuation": True}
+        with patch.object(
+            mcp_server.task_manager, 'create_web_search',
+            new_callable=AsyncMock, return_value=mock_result
+        ) as mock_fn:
+            await mcp_server.manus_web_search("follow up", task_id="ws-001")
+            mock_fn.assert_called_once()
+            assert mock_fn.call_args.kwargs["task_id"] == "ws-001"
+
+    @pytest.mark.asyncio
+    async def test_plan_passes_task_id(self):
+        import mcp_server
+        mock_result = {"task_id": "pl-001", "is_continuation": True}
+        with patch.object(
+            mcp_server.task_manager, 'create_plan',
+            new_callable=AsyncMock, return_value=mock_result
+        ) as mock_fn:
+            await mcp_server.manus_plan("refine section 3", task_id="pl-001")
+            mock_fn.assert_called_once()
+            assert mock_fn.call_args.kwargs["task_id"] == "pl-001"
+
+    @pytest.mark.asyncio
+    async def test_code_passes_task_id(self):
+        import mcp_server
+        mock_result = {"task_id": "cd-001", "is_continuation": True}
+        with patch.object(
+            mcp_server.task_manager, 'create_coding',
+            new_callable=AsyncMock, return_value=mock_result
+        ) as mock_fn:
+            await mcp_server.manus_code("add tests", task_id="cd-001")
+            mock_fn.assert_called_once()
+            assert mock_fn.call_args.kwargs["task_id"] == "cd-001"
+
+    @pytest.mark.asyncio
+    async def test_simple_task_passes_task_id(self):
+        import mcp_server
+        mock_result = {"task_id": "st-001", "is_continuation": True}
+        with patch.object(
+            mcp_server.task_manager, 'create_simple_task',
+            new_callable=AsyncMock, return_value=mock_result
+        ) as mock_fn:
+            await mcp_server.manus_simple_task("next step", task_id="st-001")
+            mock_fn.assert_called_once()
+            assert mock_fn.call_args.kwargs["task_id"] == "st-001"
+
+    @pytest.mark.asyncio
+    async def test_empty_task_id_treated_as_none(self):
+        """Empty string task_id should be treated as None (new task)."""
+        import mcp_server
+        mock_result = {"task_id": "new-001", "is_continuation": False}
+        with patch.object(
+            mcp_server.task_manager, 'create_simple_task',
+            new_callable=AsyncMock, return_value=mock_result
+        ) as mock_fn:
+            await mcp_server.manus_simple_task("new task", task_id="")
+            mock_fn.assert_called_once()
+            assert mock_fn.call_args.kwargs["task_id"] is None
 
 
 class TestMCPToolErrorHandling:
@@ -183,6 +300,19 @@ class TestMCPToolErrorHandling:
             result = await mcp_server.manus_plan("test")
             parsed = json.loads(result)
             assert "error" in parsed
+
+    @pytest.mark.asyncio
+    async def test_simple_task_error_returns_json(self):
+        import mcp_server
+        with patch.object(
+            mcp_server.task_manager, 'create_simple_task',
+            new_callable=AsyncMock,
+            side_effect=ManusAPIError("Rate limited", status_code=429)
+        ):
+            result = await mcp_server.manus_simple_task("test")
+            parsed = json.loads(result)
+            assert "error" in parsed
+            assert parsed["status"] == "failed"
 
     @pytest.mark.asyncio
     async def test_get_status_error_returns_json(self):

@@ -4,7 +4,7 @@ Unit tests for the Manus MCP enhanced modules.
 Tests cover:
 - Prompt builder output format and content
 - ManusAPIClient initialization and configuration
-- TaskManager creation methods and status handling
+- TaskManager creation methods (4 modes) and multi-turn support
 - TaskResult data class behavior
 """
 
@@ -218,6 +218,7 @@ class TestLocalTaskRecord:
         assert summary["task_id"] == "t1"
         assert summary["mode"] == "web_search"
         assert summary["status"] == "submitted"
+        assert summary["turn_count"] == 1
 
     def test_summary_with_remote(self):
         remote = TaskResult(
@@ -237,6 +238,18 @@ class TestLocalTaskRecord:
         assert summary["status"] == "running"
         assert summary["title"] == "Test Task"
         assert summary["use_local_browser"] is True
+        assert summary["turn_count"] == 1
+
+    def test_summary_multi_turn(self):
+        record = LocalTaskRecord(
+            task_id="t1",
+            mode="simple_task",
+            original_input="test",
+            use_local_browser=False,
+            turn_count=3,
+        )
+        summary = record.to_summary()
+        assert summary["turn_count"] == 3
 
 
 class TestTaskManager:
@@ -252,6 +265,8 @@ class TestTaskManager:
         mgr = TaskManager(api_client=mock_client)
         return mgr
 
+    # --- web_search ---
+
     @pytest.mark.asyncio
     async def test_create_web_search(self, manager, mock_client):
         mock_client.create_task.return_value = TaskResult(
@@ -265,12 +280,37 @@ class TestTaskManager:
         assert result["task_id"] == "ws-001"
         assert result["mode"] == "web_search"
         assert result["status"] == "running"
+        assert result["is_continuation"] is False
 
         # Verify API was called correctly
         mock_client.create_task.assert_called_once()
         call_kwargs = mock_client.create_task.call_args.kwargs
         assert "search" in call_kwargs["prompt"].lower()
         assert call_kwargs["use_local_browser"] is False
+        assert call_kwargs["task_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_create_web_search_continuation(self, manager, mock_client):
+        """Test multi-turn continuation for web_search."""
+        # First turn
+        mock_client.create_task.return_value = TaskResult(
+            task_id="ws-001", status="running", title="Search",
+            task_url="https://manus.im/app/ws-001",
+        )
+        await manager.create_web_search("Python 3.13 features")
+
+        # Second turn (continuation)
+        mock_client.create_task.return_value = TaskResult(
+            task_id="ws-001", status="running", title="Search",
+            task_url="https://manus.im/app/ws-001",
+        )
+        result = await manager.create_web_search(
+            "What about the new REPL?", task_id="ws-001"
+        )
+        assert result["is_continuation"] is True
+        assert result["turn_count"] == 2
+
+    # --- plan ---
 
     @pytest.mark.asyncio
     async def test_create_plan(self, manager, mock_client):
@@ -289,9 +329,31 @@ class TestTaskManager:
         assert result["task_id"] == "pl-001"
         assert result["mode"] == "plan"
         assert result["use_local_browser"] is True
+        assert result["is_continuation"] is False
 
         call_kwargs = mock_client.create_task.call_args.kwargs
         assert call_kwargs["use_local_browser"] is True
+
+    @pytest.mark.asyncio
+    async def test_create_plan_continuation(self, manager, mock_client):
+        """Test multi-turn continuation for plan."""
+        mock_client.create_task.return_value = TaskResult(
+            task_id="pl-001", status="running", title="Plan",
+            task_url="https://manus.im/app/pl-001",
+        )
+        await manager.create_plan("AI startup")
+
+        mock_client.create_task.return_value = TaskResult(
+            task_id="pl-001", status="running", title="Plan",
+            task_url="https://manus.im/app/pl-001",
+        )
+        result = await manager.create_plan(
+            "Now focus on the marketing section", task_id="pl-001"
+        )
+        assert result["is_continuation"] is True
+        assert result["turn_count"] == 2
+
+    # --- coding ---
 
     @pytest.mark.asyncio
     async def test_create_coding(self, manager, mock_client):
@@ -326,8 +388,118 @@ class TestTaskManager:
         assert result["task_id"] == "cd-002"
 
         call_kwargs = mock_client.create_task.call_args.kwargs
-        # No GitHub connector when no repo URL
         assert not call_kwargs.get("connectors")
+
+    @pytest.mark.asyncio
+    async def test_create_coding_continuation(self, manager, mock_client):
+        """Test multi-turn continuation for coding."""
+        mock_client.create_task.return_value = TaskResult(
+            task_id="cd-001", status="running", title="Code",
+            task_url="https://manus.im/app/cd-001",
+        )
+        await manager.create_coding("Build a REST API")
+
+        mock_client.create_task.return_value = TaskResult(
+            task_id="cd-001", status="running", title="Code",
+            task_url="https://manus.im/app/cd-001",
+        )
+        result = await manager.create_coding(
+            "Add unit tests", task_id="cd-001"
+        )
+        assert result["is_continuation"] is True
+        assert result["turn_count"] == 2
+
+    # --- simple_task ---
+
+    @pytest.mark.asyncio
+    async def test_create_simple_task(self, manager, mock_client):
+        """Test simple_task with raw prompt pass-through."""
+        mock_client.create_task.return_value = TaskResult(
+            task_id="st-001",
+            status="running",
+            title="Simple Task",
+            task_url="https://manus.im/app/st-001",
+        )
+
+        result = await manager.create_simple_task(
+            prompt="Go to example.com and extract the main heading"
+        )
+        assert result["task_id"] == "st-001"
+        assert result["mode"] == "simple_task"
+        assert result["is_continuation"] is False
+
+        # Verify the prompt is passed through WITHOUT any template wrapping
+        call_kwargs = mock_client.create_task.call_args.kwargs
+        assert call_kwargs["prompt"] == "Go to example.com and extract the main heading"
+        # simple_task enables interactive mode by default
+        assert call_kwargs["interactive_mode"] is True
+
+    @pytest.mark.asyncio
+    async def test_create_simple_task_multi_turn(self, manager, mock_client):
+        """Test simple_task multi-turn conversation flow."""
+        # Turn 1: Create
+        mock_client.create_task.return_value = TaskResult(
+            task_id="st-001", status="running", title="Simple",
+            task_url="https://manus.im/app/st-001",
+        )
+        result1 = await manager.create_simple_task("Build a TODO CLI app")
+        assert result1["turn_count"] == 1
+        assert result1["is_continuation"] is False
+
+        # Turn 2: Continue
+        mock_client.create_task.return_value = TaskResult(
+            task_id="st-001", status="running", title="Simple",
+            task_url="https://manus.im/app/st-001",
+        )
+        result2 = await manager.create_simple_task(
+            "Add a --verbose flag", task_id="st-001"
+        )
+        assert result2["turn_count"] == 2
+        assert result2["is_continuation"] is True
+
+        # Turn 3: Continue again
+        mock_client.create_task.return_value = TaskResult(
+            task_id="st-001", status="running", title="Simple",
+            task_url="https://manus.im/app/st-001",
+        )
+        result3 = await manager.create_simple_task(
+            "Now add unit tests", task_id="st-001"
+        )
+        assert result3["turn_count"] == 3
+        assert result3["is_continuation"] is True
+
+    @pytest.mark.asyncio
+    async def test_simple_task_with_browser(self, manager, mock_client):
+        """Test simple_task with local browser enabled."""
+        mock_client.create_task.return_value = TaskResult(
+            task_id="st-002", status="running", title="Browser Task",
+            task_url="https://manus.im/app/st-002",
+        )
+
+        result = await manager.create_simple_task(
+            prompt="Log into my GitHub and check notifications",
+            use_local_browser=True,
+        )
+        assert result["use_local_browser"] is True
+
+        call_kwargs = mock_client.create_task.call_args.kwargs
+        assert call_kwargs["use_local_browser"] is True
+
+    @pytest.mark.asyncio
+    async def test_simple_task_prompt_not_modified(self, manager, mock_client):
+        """Verify that simple_task does NOT modify the prompt."""
+        raw_prompt = "This is my exact prompt with special chars: <>&\"'"
+        mock_client.create_task.return_value = TaskResult(
+            task_id="st-003", status="running", title="Raw",
+            task_url="https://manus.im/app/st-003",
+        )
+
+        await manager.create_simple_task(prompt=raw_prompt)
+
+        call_kwargs = mock_client.create_task.call_args.kwargs
+        assert call_kwargs["prompt"] == raw_prompt
+
+    # --- status ---
 
     @pytest.mark.asyncio
     async def test_get_status(self, manager, mock_client):
@@ -356,6 +528,28 @@ class TestTaskManager:
         assert status["is_complete"] is True
         assert "42" in status["final_text"]
         assert status["mode"] == "web_search"
+        assert status["turn_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_get_status_completed_has_continue_hint(self, manager, mock_client):
+        """Completed tasks should include continuation hints."""
+        mock_client.create_task.return_value = TaskResult(
+            task_id="t-001", status="running", title="Test",
+            task_url="https://manus.im/app/t-001",
+        )
+        await manager.create_simple_task("test")
+
+        mock_client.get_task.return_value = TaskResult(
+            task_id="t-001", status="completed", title="Test",
+            task_url="https://manus.im/app/t-001",
+            output=[{"role": "assistant", "content": [
+                {"type": "output_text", "text": "Done."}
+            ]}],
+        )
+
+        status = await manager.get_status("t-001")
+        assert status["can_continue"] is True
+        assert "task_id" in status["continue_hint"]
 
     @pytest.mark.asyncio
     async def test_get_status_api_error(self, manager, mock_client):
@@ -379,6 +573,35 @@ class TestTaskManager:
 
         results = await manager.list_tasks()
         assert isinstance(results, list)
+
+    @pytest.mark.asyncio
+    async def test_list_tasks_filter_by_mode(self, manager, mock_client):
+        """Test filtering tasks by mode."""
+        mock_client.create_task.return_value = TaskResult(
+            task_id="ws-001", status="running", title="Search",
+            task_url="https://manus.im/app/ws-001",
+        )
+        await manager.create_web_search("test search")
+
+        mock_client.create_task.return_value = TaskResult(
+            task_id="st-001", status="running", title="Simple",
+            task_url="https://manus.im/app/st-001",
+        )
+        await manager.create_simple_task("test simple")
+
+        # Filter by web_search
+        results = await manager.list_tasks(mode="web_search")
+        assert len(results) == 1
+        assert results[0]["mode"] == "web_search"
+
+        # Filter by simple_task
+        results = await manager.list_tasks(mode="simple_task")
+        assert len(results) == 1
+        assert results[0]["mode"] == "simple_task"
+
+        # No filter
+        results = await manager.list_tasks()
+        assert len(results) == 2
 
 
 # ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 
 > A Model Context Protocol (MCP) server that bridges local CLI tools (Codex, Claude Desktop, etc.) with the **Manus cloud AI agent platform**.
 
-Manus MCP lets you dispatch powerful cloud-based AI tasks — web search, research planning, and code generation — directly from your terminal or any MCP-compatible client. All tasks support optional **local browser integration** and real-time **status monitoring**.
+Manus MCP lets you dispatch powerful cloud-based AI tasks — web search, research planning, and code generation — directly from your terminal or any MCP-compatible client. All tasks support optional **local browser integration** and **multi-turn conversations**.
 
 ## Features
 
@@ -11,6 +11,7 @@ Manus MCP lets you dispatch powerful cloud-based AI tasks — web search, resear
 | **Web Search** | `manus_web_search` | Quick, cited web search answers. Acts as an AI-powered search engine. | `manus-1.6-lite` |
 | **Plan** | `manus_plan` | Deep research, fact-checking, and structured professional planning. | `manus-1.6` |
 | **Coding** | `manus_code` | Create code from scratch or modify existing git repositories. | `manus-1.6` |
+| **Simple Task** | `manus_simple_task` | Raw prompt pass-through for custom, interactive workflows. | `manus-1.6` |
 
 ### Additional Tools
 
@@ -23,6 +24,7 @@ Manus MCP lets you dispatch powerful cloud-based AI tasks — web search, resear
 
 ### Cross-Cutting Features
 
+- **Multi-Turn Conversations**: All task creation tools accept a `task_id` parameter to continue a previous conversation, allowing for iterative refinement and follow-up instructions.
 - **Local Browser Support**: All task modes accept `use_local_browser=True` to let the Manus agent use your authenticated browser session (for sites requiring login).
 - **Agent Profile Selection**: Choose between `manus-1.6-lite` (fast), `manus-1.6` (balanced), or `manus-1.6-max` (most capable).
 - **Task Status Monitoring**: Non-blocking task creation with polling-based status checks.
@@ -93,25 +95,31 @@ codex --mcp-config claude_desktop_config.json
 Then ask Codex to use the Manus tools:
 
 ```
-> Search the web for the latest Python 3.13 features
-> Create a plan for migrating our app from React to Next.js
-> Build a REST API with FastAPI that manages a todo list
+> Use manus_simple_task to build a Python CLI for managing TODOs.
+> (After it's done) Now use manus_simple_task to add unit tests for the delete command, continuing the previous task.
+> Use manus_plan to create a migration plan from React to Next.js.
 ```
 
-## Workflow
+## Workflow: Single-Turn vs. Multi-Turn
 
-The typical interaction pattern is **create → poll → retrieve**:
+The typical interaction pattern is **create → poll → retrieve**. For multi-turn, you simply repeat the cycle with the same `task_id`.
 
-```
-1. Client calls manus_web_search("latest AI news")
-   → Returns: {"task_id": "abc123", "status": "running", ...}
+### Single-Turn (Fire and Forget)
 
-2. Client calls get_task_status("abc123")
-   → Returns: {"status": "running", ...}
+1.  **Client calls** `manus_web_search("latest AI news")`
+    -   **Returns**: `{"task_id": "abc123", "status": "running", ...}`
+2.  **Client polls** `get_task_status("abc123")` until `status` is `completed`.
+3.  **Client reads** `final_text` and `attachments` from the final status response.
 
-3. Client calls get_task_status("abc123") again
-   → Returns: {"status": "completed", "final_text": "...", "attachments": [...]}
-```
+### Multi-Turn (Iterative Refinement)
+
+1.  **Client calls** `manus_simple_task(prompt="Build a Python CLI for managing TODOs")`
+    -   **Returns**: `{"task_id": "xyz789", "status": "running", ...}`
+2.  **Client polls** `get_task_status("xyz789")` until `status` is `completed`.
+3.  **Client reads** the generated code and decides on a follow-up.
+4.  **Client calls** `manus_simple_task(prompt="Now add a --verbose flag", task_id="xyz789")`
+    -   The agent receives this as a follow-up instruction, remembering the code it just wrote.
+5.  **Client polls** `get_task_status("xyz789")` again for the new result.
 
 All task creation is **non-blocking** — the tool returns immediately with a `task_id`, and the client polls for results at its own pace.
 
@@ -156,32 +164,42 @@ manus-mcp/
 
 ## API Reference
 
-### `manus_web_search(query, use_local_browser?, agent_profile?)`
+All task creation tools (`manus_web_search`, `manus_plan`, `manus_code`, `manus_simple_task`) share these common parameters:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `query` | `str` | *(required)* | The search query or question |
 | `use_local_browser` | `bool` | `False` | Use your local browser session |
-| `agent_profile` | `str` | `"manus-1.6-lite"` | Agent capability level |
+| `agent_profile` | `str` | (varies) | Agent capability level (`lite`, `standard`, `max`) |
+| `task_id` | `str` | `""` | **Pass an existing `task_id` to continue a conversation** |
 
-### `manus_plan(topic, context?, use_local_browser?, agent_profile?)`
+### `manus_simple_task(prompt, ...)`
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `topic` | `str` | *(required)* | Subject to research and plan for |
-| `context` | `str` | `""` | Additional constraints or requirements |
-| `use_local_browser` | `bool` | `False` | Use your local browser session |
-| `agent_profile` | `str` | `"manus-1.6"` | Agent capability level |
+Sends a raw prompt directly to Manus. This is the most flexible tool and is ideal for multi-turn interactive sessions.
 
-### `manus_code(prompt, git_repo_url?, language?, use_local_browser?, agent_profile?)`
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `prompt` | `str` | The raw prompt to send, exactly as-is. |
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `prompt` | `str` | *(required)* | What to build or change |
-| `git_repo_url` | `str` | `""` | Existing repo to clone and modify |
-| `language` | `str` | `""` | Preferred language/framework |
-| `use_local_browser` | `bool` | `False` | Use your local browser session |
-| `agent_profile` | `str` | `"manus-1.6"` | Agent capability level |
+### `manus_web_search(query, ...)`
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `query` | `str` | The search query or question. |
+
+### `manus_plan(topic, context?, ...)`
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `topic` | `str` | Subject to research and plan for. |
+| `context` | `str` | Optional additional constraints. |
+
+### `manus_code(prompt, git_repo_url?, language?, ...)`
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `prompt` | `str` | What to build or change. |
+| `git_repo_url` | `str` | Existing repo to clone and modify. |
+| `language` | `str` | Preferred language/framework. |
 
 ### `get_task_status(task_id)`
 
@@ -192,6 +210,8 @@ Returns a JSON object with:
 | `task_id` | `str` | Task identifier |
 | `status` | `str` | `"running"`, `"pending"`, `"completed"`, or `"failed"` |
 | `is_complete` | `bool` | Whether the task has finished |
+| `can_continue` | `bool` | **If `True`, you can pass the `task_id` to another tool** |
+| `turn_count` | `int` | Number of turns in this conversation |
 | `final_text` | `str` | Final output text (only when completed) |
 | `attachments` | `array` | Generated files with download URLs (only when completed) |
 | `task_url` | `str` | Link to view the task in the Manus web app |
